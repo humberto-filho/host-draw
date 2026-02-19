@@ -1,0 +1,119 @@
+:root {
+    /* Colors - Neovim Gruvbox inspired default */
+    --bg-color: #282828;
+    --fg-color: #ebdbb2;
+    --accent-color: #fe8019;
+    --panel-bg: #3c3836;
+    --panel-border: #504945;
+
+    /* Configurable Shape Styles */
+    --shape-stroke-default: #ebdbb2;
+    --shape-fill-default: transparent;
+    --shape-stroke-width-default: 2px;
+
+    /* UI */
+    --font-ui: 'Inter', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--fg-color);
+    font-family: var(--font-ui);
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+}
+
+#app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+canvas {
+    display: block;
+    cursor: crosshair;
+}
+
+canvas.cursor-pencil {
+    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ebdbb2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>') 0 24, auto;
+}
+
+#ui-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    /* Let clicks pass through to canvas */
+}
+
+.panel {
+    pointer-events: auto;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 8px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+#status-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+}
+
+#command-palette {
+    position: absolute;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 400px;
+    background: var(--panel-bg);
+    border: 1px solid var(--accent-color);
+    border-radius: 6px;
+    padding: 10px;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+#command-palette.hidden {
+    display: none;
+}
+
+#command-input {
+    width: 100%;
+    background: #1d2021;
+    border: none;
+    color: var(--fg-color);
+    padding: 8px;
+    font-family: var(--font-mono);
+    outline: none;
+}
+
+#mode-indicator {
+    font-weight: bold;
+    color: var(--accent-color);
+}
