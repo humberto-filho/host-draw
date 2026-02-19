@@ -1,17 +1,18 @@
 import { BaseTool } from './base.js';
 
-export class PencilTool extends BaseTool {
+export class LineTool extends BaseTool {
     constructor(app) {
-        super(app, 'pencil');
+        super(app, 'line');
         this.isDrawing = false;
-        this.currentPath = null;
+        this.startPoint = null;
     }
 
     onMouseDown(e) {
         this.isDrawing = true;
+        this.startPoint = { x: e.x, y: e.y };
         this.currentPath = {
             type: 'path',
-            points: [{ x: e.x, y: e.y }],
+            points: [this.startPoint, this.startPoint],
             stroke: this.app.tools.style.strokeColor,
             strokeWidth: this.app.tools.style.strokeWidth,
             fill: 'transparent'
@@ -21,9 +22,9 @@ export class PencilTool extends BaseTool {
 
     onMouseMove(e) {
         if (!this.isDrawing) return;
-
-        this.currentPath.points.push({ x: e.x, y: e.y });
-        // Render loop will pick up previewShape
+        // Update the second point to be the current mouse position
+        // This creates a straight line from start to current
+        this.currentPath.points = [this.startPoint, { x: e.x, y: e.y }];
     }
 
     onMouseUp(e) {
@@ -31,6 +32,8 @@ export class PencilTool extends BaseTool {
 
         this.isDrawing = false;
         if (this.currentPath) {
+            // Finalize the line
+            this.currentPath.points = [this.startPoint, { x: e.x, y: e.y }];
             this.app.state.addShape(this.currentPath);
             this.previewShape = null;
             this.currentPath = null;

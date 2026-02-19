@@ -17,9 +17,9 @@ export class CircleTool extends BaseTool {
             y: e.y,
             width: 0,
             height: 0,
-            stroke: null,
-            strokeWidth: null,
-            fill: 'transparent'
+            stroke: this.app.tools.style.strokeColor,
+            strokeWidth: this.app.tools.style.strokeWidth,
+            fill: this.app.tools.style.fillColor
         };
         this.previewShape = this.currentCircle;
     }

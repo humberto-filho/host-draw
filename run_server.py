@@ -3,6 +3,7 @@ import socketserver
 import os
 import json
 import base64
+import sys
 from urllib.parse import urlparse
 
 PORT = 8000
@@ -13,9 +14,7 @@ if not os.path.exists(DATA_DIR):
 
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
-        # Parse the URL to decide what to do
         parsed_path = urlparse(self.path)
-        
         if parsed_path.path == '/api/save':
             self.handle_save()
         else:
@@ -26,25 +25,23 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
-            
+
             filename = data.get('filename')
-            content_base64 = data.get('content') # Expecting base64 encoded data
-            
+            content_base64 = data.get('content')
+
             if not filename or not content_base64:
                 self.send_error(400, "Missing filename or content")
                 return
 
-            # Remove header if present (e.g., "data:image/png;base64,")
             if ',' in content_base64:
-                header, encoded = content_base64.split(',', 1)
+                _, encoded = content_base64.split(',', 1)
             else:
                 encoded = content_base64
 
             file_path = os.path.join(DATA_DIR, filename)
-            
             with open(file_path, 'wb') as f:
                 f.write(base64.b64decode(encoded))
-                
+
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
@@ -55,12 +52,20 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             print(f"Error saving file: {e}")
             self.send_error(500, str(e))
 
-print(f"Serving at http://localhost:{PORT}")
-print(f"files will be saved to {DATA_DIR}")
-
-with socketserver.TCPServer(("", PORT), CustomHandler) as httpd:
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
+    def log_message(self, format, *args):
+        # Suppress routine GET/POST logs to keep terminal clean
         pass
-    httpd.server_close()
+
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+print(f"\n  Host-Draw server running at http://localhost:{PORT}")
+print(f"  Files saved to: {DATA_DIR}")
+print(f"  Press Ctrl+C to stop.\n")
+
+try:
+    with ReusableTCPServer(("", PORT), CustomHandler) as httpd:
+        httpd.serve_forever()
+except KeyboardInterrupt:
+    print("\n  Server stopped cleanly.")
+    sys.exit(0)

@@ -39,11 +39,11 @@ body {
 
 canvas {
     display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
     cursor: crosshair;
-}
-
-canvas.cursor-pencil {
-    cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="%23ebdbb2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>') 0 24, auto;
 }
 
 #ui-layer {
@@ -53,7 +53,7 @@ canvas.cursor-pencil {
     width: 100%;
     height: 100%;
     pointer-events: none;
-    /* Let clicks pass through to canvas */
+    z-index: 10;
 }
 
 .panel {
@@ -62,9 +62,89 @@ canvas.cursor-pencil {
     border: 1px solid var(--panel-border);
     border-radius: 4px;
     padding: 8px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
 }
 
+/* Toolbar at top center */
+#toolbar {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+#toolbar button {
+    pointer-events: auto;
+    background: var(--panel-bg);
+    color: var(--fg-color);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
+}
+
+#toolbar button:hover {
+    background: var(--accent-color);
+    color: #282828;
+}
+
+/* Color palette - vertical bar on left */
+#color-palette {
+    pointer-events: auto;
+    position: absolute;
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 12px 6px;
+}
+
+.color-item {
+    display: flex;
+    flex-direction: row-reverse;
+    /* Label on left of swatch */
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: background 0.15s;
+}
+
+.color-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.color-swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    flex-shrink: 0;
+}
+
+.color-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--fg-color);
+    width: 10px;
+    text-align: center;
+}
+
+/* Status bar */
 #status-bar {
     position: absolute;
     bottom: 0;
@@ -81,8 +161,16 @@ canvas.cursor-pencil {
     border-left: none;
     border-right: none;
     border-bottom: none;
+    z-index: 20;
 }
 
+/* HUD */
+#hud {
+    pointer-events: none;
+    z-index: 20;
+}
+
+/* Command palette */
 #command-palette {
     position: absolute;
     top: 20%;
@@ -97,6 +185,7 @@ canvas.cursor-pencil {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    z-index: 30;
 }
 
 #command-palette.hidden {

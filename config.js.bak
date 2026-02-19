@@ -1,0 +1,16 @@
+export default {
+    keybindings: {
+        // Tools
+        'p': 'tool.pencil',
+        'r': 'tool.rectangle',
+        'c': 'tool.circle',
+
+        // Colors (examples, detailed list in defaults)
+        'd': 'set.theme.dark',
+        't': 'set.theme.light'
+    },
+
+    theme: {
+        accent: '#ff0000'
+    }
+};

@@ -7,6 +7,10 @@ export class CanvasManager {
         this.height = 0;
         this.dpr = window.devicePixelRatio || 1;
 
+        // Offscreen canvas for shapes layer (eraser won't affect grid)
+        this.shapeCanvas = document.createElement('canvas');
+        this.shapeCtx = this.shapeCanvas.getContext('2d');
+
         // Viewport state (Infinite Board)
         this.offset = { x: 0, y: 0 };
         this.scale = 1;
@@ -32,24 +36,28 @@ export class CanvasManager {
         // Handle High DPI displays
         this.canvas.width = this.width * this.dpr;
         this.canvas.height = this.height * this.dpr;
-
         this.canvas.style.width = `${this.width}px`;
         this.canvas.style.height = `${this.height}px`;
 
-        // Reset transform to identity for clearRect to work on full screen
-        // render() will handle the app transforms
+        // Resize offscreen shape canvas to match
+        this.shapeCanvas.width = this.width * this.dpr;
+        this.shapeCanvas.height = this.height * this.dpr;
 
-        this.render(); // Force re-render
+        this.render();
     }
 
     attachInputListeners() {
         this.canvas.addEventListener('mousedown', (e) => {
+            // Middle mouse or Space+Left = panning
             if (e.button === 1 || (e.button === 0 && e.getModifierState('Space'))) {
                 this.isPanning = true;
                 this.lastMouse = { x: e.clientX, y: e.clientY };
                 return;
             }
-            this.app.tools.handleEvent('mousedown', e);
+            // ONLY left click (button 0) should trigger tools
+            if (e.button === 0) {
+                this.app.tools.handleEvent('mousedown', e);
+            }
         });
 
         window.addEventListener('mousemove', (e) => {
@@ -59,7 +67,6 @@ export class CanvasManager {
                 this.offset.x += dx;
                 this.offset.y += dy;
                 this.lastMouse = { x: e.clientX, y: e.clientY };
-                // Render will happen in loop
                 return;
             }
             this.app.tools.handleEvent('mousemove', e);
@@ -70,7 +77,9 @@ export class CanvasManager {
                 this.isPanning = false;
                 return;
             }
-            this.app.tools.handleEvent('mouseup', e);
+            if (e.button === 0) {
+                this.app.tools.handleEvent('mouseup', e);
+            }
         });
 
         this.canvas.addEventListener('wheel', (e) => {
@@ -79,20 +88,15 @@ export class CanvasManager {
             const delta = -e.deltaY * zoomSensitivity;
             const newScale = Math.min(Math.max(0.1, this.scale + delta), 5);
 
-            // Zoom towards mouse pointer
-            // 1. Mouse pos relative to viewport
             const rect = this.canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
 
-            // 2. Mouse pos in world coords before zoom
             const worldX = (mouseX - this.offset.x) / this.scale;
             const worldY = (mouseY - this.offset.y) / this.scale;
 
-            // 3. Update scale
             this.scale = newScale;
 
-            // 4. Calculate new offset to keep world point under mouse
             this.offset.x = mouseX - worldX * this.scale;
             this.offset.y = mouseY - worldY * this.scale;
         }, { passive: false });
@@ -103,7 +107,6 @@ export class CanvasManager {
     }
 
     attachDropListeners() {
-        // Prevent default browser behavior for drag/drop
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             this.canvas.addEventListener(eventName, (e) => {
                 e.preventDefault();
@@ -125,7 +128,6 @@ export class CanvasManager {
                 reader.onload = (evt) => {
                     const img = new Image();
                     img.onload = () => {
-                        // Calculate world coordinates for drop
                         const rect = this.canvas.getBoundingClientRect();
                         const screenX = e.clientX - rect.left;
                         const screenY = e.clientY - rect.top;
@@ -133,16 +135,15 @@ export class CanvasManager {
                         const worldX = (screenX - this.offset.x) / this.scale;
                         const worldY = (screenY - this.offset.y) / this.scale;
 
-                        // Add image shape
                         this.app.state.addShape({
                             type: 'image',
-                            x: worldX - img.width / 2, // Center on mouse
+                            x: worldX - img.width / 2,
                             y: worldY - img.height / 2,
                             width: img.width,
                             height: img.height,
-                            src: evt.target.result // Base64
+                            src: evt.target.result
                         });
-                        this.app.state.uploadImage(file); // Optional: upload to server
+                        this.app.state.uploadImage(file);
                     };
                     img.src = evt.target.result;
                 };
@@ -151,7 +152,6 @@ export class CanvasManager {
         }
     }
 
-    // ... existing startRenderLoop ...
     startRenderLoop() {
         const loop = () => {
             this.render();
@@ -161,50 +161,67 @@ export class CanvasManager {
     }
 
     render() {
-        // Clear canvas (reset transform first)
+        // === MAIN CANVAS: Clear and draw background grid ===
         this.ctx.setTransform(1, 0, 0, 1, 0, 0);
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Apply DPR scaling
+        // DPR + viewport transform for main canvas
         this.ctx.scale(this.dpr, this.dpr);
-
-        // Apply Viewport Transform
         this.ctx.translate(this.offset.x, this.offset.y);
         this.ctx.scale(this.scale, this.scale);
 
-        // Draw background template
+        // Draw background grid on main canvas (protected from eraser)
         this.drawBackground();
 
-        // Draw all shapes in state
+        // === OFFSCREEN SHAPE CANVAS: Draw shapes here ===
+        // This keeps eraser (destination-out) from affecting the grid
+        this.shapeCtx.setTransform(1, 0, 0, 1, 0, 0);
+        this.shapeCtx.clearRect(0, 0, this.shapeCanvas.width, this.shapeCanvas.height);
+
+        // Same DPR + viewport transform
+        this.shapeCtx.scale(this.dpr, this.dpr);
+        this.shapeCtx.translate(this.offset.x, this.offset.y);
+        this.shapeCtx.scale(this.scale, this.scale);
+
+        // Draw all shapes on offscreen canvas
         this.app.state.shapes.forEach(shape => {
-            this.drawShape(shape);
+            this.drawShape(this.shapeCtx, shape);
         });
 
-        // Draw generic temporary shape (preview)
+        // Draw preview shape if any
         if (this.app.tools.currentTool && this.app.tools.currentTool.previewShape) {
-            this.ctx.save();
-            this.ctx.globalAlpha = 0.6; // Preview opacity
-            this.drawShape(this.app.tools.currentTool.previewShape);
-            this.ctx.restore();
+            this.shapeCtx.save();
+            this.shapeCtx.globalAlpha = 0.6;
+            this.drawShape(this.shapeCtx, this.app.tools.currentTool.previewShape);
+            this.shapeCtx.restore();
         }
+
+        // === Composite offscreen shapes onto main canvas ===
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.drawImage(this.shapeCanvas, 0, 0);
     }
 
     drawBackground() {
-        // Dynamic Grid
+        const theme = this.app.config.get('theme') || {};
         const step = 50;
-        const color = 'rgba(0,0,0,0.1)';
-        const boldColor = 'rgba(0,0,0,0.2)';
+        const color = theme.gridColor || 'rgba(0,0,0,0.1)';
+        const boldColor = theme.gridBoldColor || 'rgba(0,0,0,0.2)';
+        const bgColor = theme.background || '#ffffff';
+
+        // Fill visible background area (screen coords)
+        this.ctx.save();
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.fillStyle = bgColor;
+        this.ctx.fillRect(0, 0, this.width, this.height);
+        this.ctx.restore();
 
         // Calculate visible world bounds
-        // Viewport TopLeft (in world coords) = -offset / scale
         const startX = Math.floor((-this.offset.x / this.scale) / step) * step;
         const startY = Math.floor((-this.offset.y / this.scale) / step) * step;
-
-        // Viewport BottomRight (in world coords) = (screenSize - offset) / scale
         const endX = Math.floor(((this.width - this.offset.x) / this.scale) / step) * step + step;
         const endY = Math.floor(((this.height - this.offset.y) / this.scale) / step) * step + step;
 
-        this.ctx.lineWidth = 1 / this.scale; // Keep lines 1px screen width
+        this.ctx.lineWidth = 1 / this.scale;
 
         for (let x = startX; x <= endX; x += step) {
             this.ctx.beginPath();
@@ -223,44 +240,44 @@ export class CanvasManager {
         }
     }
 
-    drawShape(shape) {
-        this.ctx.save();
-        this.ctx.beginPath();
+    drawShape(ctx, shape) {
+        ctx.save();
+        ctx.beginPath();
+
+        // Handle Eraser Mode
+        if (shape.composite) {
+            ctx.globalCompositeOperation = shape.composite;
+        }
 
         // Apply Styles
-        this.ctx.strokeStyle = shape.stroke || getComputedStyle(document.body).getPropertyValue('--shape-stroke-default').trim();
-        this.ctx.lineWidth = shape.strokeWidth || parseInt(getComputedStyle(document.body).getPropertyValue('--shape-stroke-width-default').trim());
-        this.ctx.fillStyle = shape.fill || getComputedStyle(document.body).getPropertyValue('--shape-fill-default').trim();
+        ctx.strokeStyle = shape.stroke || '#000000';
+        ctx.lineWidth = shape.strokeWidth || 2;
+        ctx.fillStyle = shape.fill || 'transparent';
 
         if (shape.type === 'path') {
             if (shape.points && shape.points.length > 0) {
-                this.ctx.moveTo(shape.points[0].x, shape.points[0].y);
+                ctx.moveTo(shape.points[0].x, shape.points[0].y);
                 for (let i = 1; i < shape.points.length; i++) {
-                    this.ctx.lineTo(shape.points[i].x, shape.points[i].y);
+                    ctx.lineTo(shape.points[i].x, shape.points[i].y);
                 }
             }
-        } else if (shape.type === 'rect') {
-            this.ctx.rect(shape.x, shape.y, shape.width, shape.height);
+        } else if (shape.type === 'rect' || shape.type === 'rectangle') {
+            ctx.rect(shape.x, shape.y, shape.width, shape.height);
         } else if (shape.type === 'circle') {
             const radius = Math.sqrt(Math.pow(shape.width, 2) + Math.pow(shape.height, 2)) / 2;
-            this.ctx.arc(shape.x + shape.width / 2, shape.y + shape.height / 2, Math.abs(radius), 0, 2 * Math.PI);
+            ctx.arc(shape.x + shape.width / 2, shape.y + shape.height / 2, Math.abs(radius), 0, 2 * Math.PI);
         } else if (shape.type === 'image') {
             const img = new Image();
             img.src = shape.src;
-            // Note: In a real app, we should cache the Image object in the shape to avoid creating it every frame
-            // For now, browser cache might help, but it's not optimal.
-            // Better: 'warm up' images in StateManager or a Resource cache.
             if (img.complete) {
-                this.ctx.drawImage(img, shape.x, shape.y, shape.width, shape.height);
-            } else {
-                // Blink issue: if not cached, it won't draw until loaded.
+                ctx.drawImage(img, shape.x, shape.y, shape.width, shape.height);
             }
         }
 
         if (shape.fill && shape.fill !== 'transparent') {
-            this.ctx.fill();
+            ctx.fill();
         }
-        this.ctx.stroke();
-        this.ctx.restore();
+        ctx.stroke();
+        ctx.restore();
     }
 }
