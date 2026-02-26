@@ -71,7 +71,7 @@ export class HUD {
 
         // Static hints for paste/image
         groups['File'].push('ctrl+v: paste image');
-        groups['File'].push('(+): insert image');
+        groups['File'].push('+: insert image');
 
         // Grab tool hints
         groups['Edit'].push('ctrl+c: copy (grab)');

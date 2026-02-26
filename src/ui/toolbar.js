@@ -66,9 +66,9 @@ export class Toolbar {
 
         // Insert Image button
         const imgBtn = document.createElement('button');
-        imgBtn.textContent = '➕';
+        imgBtn.textContent = 'Image (+)';
+        imgBtn.className = 'tool-btn';
         imgBtn.title = 'Insert Image (Ctrl+V to paste)';
-        imgBtn.style.fontSize = '16px';
         imgBtn.onclick = () => {
             if (this.app.commands) this.app.commands.execute('image.insert');
         };
