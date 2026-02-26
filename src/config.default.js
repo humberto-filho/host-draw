@@ -6,9 +6,6 @@ export const defaultConfig = {
         "4": "set.color.4",
         "5": "set.color.5",
         "6": "set.color.6",
-        "7": "set.color.7",
-        "8": "set.color.8",
-        "9": "set.color.9",
         "p": "tool.pencil",
         "r": "tool.rectangle",
         "c": "tool.circle",
@@ -74,22 +71,6 @@ export const defaultConfig = {
                 {
                     "name": "Purple",
                     "hex": "#b16286"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#134937"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#6ce0c3"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#fe626f"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#856063"
                 }
             ],
             "dark": [
@@ -116,22 +97,6 @@ export const defaultConfig = {
                 {
                     "name": "Purple",
                     "hex": "#d3869b"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#134937"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#6ce0c3"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#fe626f"
-                },
-                {
-                    "name": "Custom",
-                    "hex": "#856063"
                 }
             ]
         },

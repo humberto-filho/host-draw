@@ -1,9 +1,9 @@
-import { PencilTool } from './pencil.js?v=29';
-import { RectangleTool } from './rectangle.js?v=29';
-import { CircleTool } from './circle.js?v=29';
-import { EraserTool } from './eraser.js?v=29';
-import { LineTool } from './line.js?v=29';
-import { GrabTool } from './grab.js?v=29';
+import { PencilTool } from './pencil.js?v=31';
+import { RectangleTool } from './rectangle.js?v=31';
+import { CircleTool } from './circle.js?v=31';
+import { EraserTool } from './eraser.js?v=31';
+import { LineTool } from './line.js?v=31';
+import { GrabTool } from './grab.js?v=31';
 
 export class ToolManager {
     constructor(app) {
@@ -64,14 +64,13 @@ export class ToolManager {
         canvas.classList.remove('cursor-pencil');
         canvas.style.cursor = 'default';
 
-        if (name === 'pencil' || name === 'line') {
+        if (name === 'pencil') {
             // Encode color for SVG
             let color = this.style.strokeColor;
             if (color.startsWith('#')) {
                 color = encodeURIComponent(color);
             }
 
-            // Scale pencil icon based on stroke width
             const size = strokeW > 5 ? 40 : 32;
 
             const svg = `
@@ -91,6 +90,17 @@ export class ToolManager {
 
             const url = `data:image/svg+xml;utf8,${svg.replace(/\n/g, '')}`;
             canvas.style.cursor = `url('${url}') 0 ${size - 8}, auto`;
+        } else if (name === 'line') {
+            let color = this.style.strokeColor;
+            if (color.startsWith('#')) {
+                color = encodeURIComponent(color);
+            }
+
+            const size = 32;
+            const svg = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="4" y1="20" x2="20" y2="4" stroke="white" stroke-width="3" stroke-linecap="round" opacity="0.8"/><line x1="4" y1="20" x2="20" y2="4" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="20" r="2" fill="${color}"/><circle cx="20" cy="4" r="2" fill="${color}"/></svg>`;
+
+            const url = `data:image/svg+xml;utf8,${svg}`;
+            canvas.style.cursor = `url('${url}') 4 20, crosshair`;
         } else if (name === 'eraser') {
             // Eraser draws at strokeWidth * 4 — cursor reflects that circle
             // Browser max cursor size is 128×128px, so cap radius at 58 (dim = 124)

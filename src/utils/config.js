@@ -6,7 +6,7 @@ export class ConfigManager {
     async load() {
         try {
             // Load default config dynamically with cache busting
-            const v = '?v=25';
+            const v = '?v=31';
             const defaultModule = await import(`../config.default.js${v}`);
             this.settings = { ...defaultModule.defaultConfig };
         } catch (e) {

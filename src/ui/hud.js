@@ -79,7 +79,7 @@ export class HUD {
 
         // Dynamic right-click stroke indicator
         const currentWidth = this.app.tools ? this.app.tools.style.strokeWidth : 2;
-        const rightClickLabel = currentWidth > 5 ? 'thin' : 'thick';
+        const rightClickLabel = currentWidth > 3 ? 'thin' : 'thick';
         groups['Strokes'].push(`right click: ${rightClickLabel}`);
 
         for (const [group, items] of Object.entries(groups)) {

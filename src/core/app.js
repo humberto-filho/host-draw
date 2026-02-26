@@ -10,7 +10,7 @@ export class App {
         try {
             console.log("Initializing Host-Draw...");
 
-            const v = '?v=30';
+            const v = '?v=31';
             const { CanvasManager } = await import(`./canvas.js${v}`);
             const { StateManager } = await import(`./state.js${v}`);
             const { ToolManager } = await import(`../tools/manager.js${v}`);
@@ -79,7 +79,7 @@ export class App {
                     this.tools.style.strokeWidth = size;
                 } else {
                     const current = this.tools.style.strokeWidth;
-                    const next = current > 5 ? 2 : 8;
+                    const next = current > 3 ? 2 : 4;
                     this.tools.style.strokeWidth = next;
                 }
                 this.tools.updateCursor();

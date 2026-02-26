@@ -1,6 +1,6 @@
-import { Toolbar } from './toolbar.js?v=30';
-import { HUD } from './hud.js?v=30';
-import { ColorPalette } from './palette.js?v=30';
+import { Toolbar } from './toolbar.js?v=31';
+import { HUD } from './hud.js?v=31';
+import { ColorPalette } from './palette.js?v=31';
 
 export class UIManager {
     constructor(app) {
