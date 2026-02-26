@@ -48,7 +48,7 @@ Open [http://localhost:8000](http://localhost:8000) in your browser.
 | `Ctrl+Z` | Undo |
 | `Right click` | Toggle thick / thin stroke |
 | `d` | Delete a custom color |
-| `1–7` | Switch between palette colors |
+| `1–6` | Switch between palette colors (You can add more if you want) |
 
 ## Themes & Colors
 
