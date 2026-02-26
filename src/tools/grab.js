@@ -11,18 +11,20 @@ export class GrabTool extends BaseTool {
 
     deactivate() {
         super.deactivate();
+        if (this.selectedShape) delete this.selectedShape._selected;
         this.selectedShape = null;
     }
 
     /**
      * Hit-test shapes in reverse order (top-first), return the first match.
-     * Supports: image, rect/rectangle, circle, path (bounding box).
+     * Skips eraser strokes (composite: destination-out) since they shouldn't be movable.
      */
     hitTest(wx, wy) {
         const shapes = this.app.state.shapes;
-        // Walk backwards so topmost shape wins
         for (let i = shapes.length - 1; i >= 0; i--) {
             const s = shapes[i];
+            // Skip eraser strokes — they use destination-out and should not be grabbed
+            if (s.composite) continue;
             if (this._shapeContains(s, wx, wy)) return s;
         }
         return null;
@@ -40,7 +42,6 @@ export class GrabTool extends BaseTool {
             return (wx - cx) ** 2 + (wy - cy) ** 2 <= r ** 2;
         }
         if (s.type === 'path' && s.points && s.points.length > 0) {
-            // Bounding box hit test for paths
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
             for (const p of s.points) {
                 if (p.x < minX) minX = p.x;
@@ -48,7 +49,6 @@ export class GrabTool extends BaseTool {
                 if (p.x > maxX) maxX = p.x;
                 if (p.y > maxY) maxY = p.y;
             }
-            // Add a small padding for thin strokes
             const pad = Math.max((s.strokeWidth || 2) * 2, 8);
             return wx >= minX - pad && wx <= maxX + pad &&
                 wy >= minY - pad && wy <= maxY + pad;
@@ -56,23 +56,37 @@ export class GrabTool extends BaseTool {
         return false;
     }
 
+    /** Get reference origin for a shape (for computing drag offset) */
+    _getOrigin(s) {
+        if (s.type === 'path' && s.points && s.points.length > 0) {
+            // Use bounding box top-left as origin for paths
+            let minX = Infinity, minY = Infinity;
+            for (const p of s.points) {
+                if (p.x < minX) minX = p.x;
+                if (p.y < minY) minY = p.y;
+            }
+            return { x: minX, y: minY };
+        }
+        return { x: s.x || 0, y: s.y || 0 };
+    }
+
     onMouseDown(e) {
+        // Deselect previous
+        if (this.selectedShape) delete this.selectedShape._selected;
+
         const target = this.hitTest(e.x, e.y);
         if (target) {
             this.isDragging = true;
             this.dragTarget = target;
             this.selectedShape = target;
-            // Mark selected for highlight
             target._selected = true;
-            // Offset so the shape doesn't jump to cursor
-            this.dragOffset.x = e.x - (target.x !== undefined ? target.x : 0);
-            this.dragOffset.y = e.y - (target.y !== undefined ? target.y : 0);
+
+            // Compute offset from cursor to shape origin so it doesn't jump
+            const origin = this._getOrigin(target);
+            this.dragOffset.x = e.x - origin.x;
+            this.dragOffset.y = e.y - origin.y;
         } else {
-            // Clicked empty space — deselect
-            if (this.selectedShape) {
-                delete this.selectedShape._selected;
-                this.selectedShape = null;
-            }
+            this.selectedShape = null;
         }
     }
 
@@ -80,33 +94,29 @@ export class GrabTool extends BaseTool {
         if (!this.isDragging || !this.dragTarget) return;
 
         const s = this.dragTarget;
-        const newX = e.x - this.dragOffset.x;
-        const newY = e.y - this.dragOffset.y;
+        const newOriginX = e.x - this.dragOffset.x;
+        const newOriginY = e.y - this.dragOffset.y;
 
-        if (s.type === 'path' && s.points) {
-            // For paths, use stored x/y or first point as reference
-            if (s.x === undefined) {
-                s.x = s.points[0].x;
-                s.y = s.points[0].y;
-            }
-
-            const ddx = newX - s.x;
-            const ddy = newY - s.y;
+        if (s.type === 'path' && s.points && s.points.length > 0) {
+            // Get current bounding box origin
+            const oldOrigin = this._getOrigin(s);
+            const dx = newOriginX - oldOrigin.x;
+            const dy = newOriginY - oldOrigin.y;
+            // Move all points
             for (const p of s.points) {
-                p.x += ddx;
-                p.y += ddy;
+                p.x += dx;
+                p.y += dy;
             }
-            s.x = newX;
-            s.y = newY;
+            // Update stored x/y if present
+            if (s.x !== undefined) { s.x += dx; s.y += dy; }
         } else {
-            s.x = newX;
-            s.y = newY;
+            s.x = newOriginX;
+            s.y = newOriginY;
         }
     }
 
     onMouseUp(e) {
         if (this.isDragging && this.dragTarget) {
-            // Save state for undo
             this.app.state.saveState();
         }
         this.isDragging = false;
@@ -132,7 +142,6 @@ export class GrabTool extends BaseTool {
         // Ctrl+C — copy selected shape to clipboard
         if (key === 'c' && (evt.ctrlKey || evt.metaKey) && this.selectedShape) {
             evt.preventDefault();
-            // Deep-clone the shape (strip internal _selected flag)
             const clone = JSON.parse(JSON.stringify(this.selectedShape));
             delete clone._selected;
             this.app.state.clipboard = clone;
@@ -144,18 +153,14 @@ export class GrabTool extends BaseTool {
         if (key === 'v' && (evt.ctrlKey || evt.metaKey) && this.app.state.clipboard) {
             evt.preventDefault();
             const clone = JSON.parse(JSON.stringify(this.app.state.clipboard));
-            // Offset so the copy doesn't land exactly on top
             if (clone.x !== undefined) { clone.x += 20; clone.y += 20; }
             if (clone.points) {
                 for (const p of clone.points) { p.x += 20; p.y += 20; }
             }
-            // Deselect old
             if (this.selectedShape) delete this.selectedShape._selected;
-            // Add and select new
             this.app.state.addShape(clone);
             clone._selected = true;
             this.selectedShape = clone;
-            // Update clipboard offset so next paste goes further
             this.app.state.clipboard = JSON.parse(JSON.stringify(clone));
             delete this.app.state.clipboard._selected;
             return;

@@ -10,7 +10,7 @@ export class App {
         try {
             console.log("Initializing Host-Draw...");
 
-            const v = '?v=28';
+            const v = '?v=29';
             const { CanvasManager } = await import(`./canvas.js${v}`);
             const { StateManager } = await import(`./state.js${v}`);
             const { ToolManager } = await import(`../tools/manager.js${v}`);

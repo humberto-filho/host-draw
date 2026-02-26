@@ -1,9 +1,9 @@
-import { PencilTool } from './pencil.js?v=27';
-import { RectangleTool } from './rectangle.js?v=27';
-import { CircleTool } from './circle.js?v=27';
-import { EraserTool } from './eraser.js?v=27';
-import { LineTool } from './line.js?v=27';
-import { GrabTool } from './grab.js?v=27';
+import { PencilTool } from './pencil.js?v=29';
+import { RectangleTool } from './rectangle.js?v=29';
+import { CircleTool } from './circle.js?v=29';
+import { EraserTool } from './eraser.js?v=29';
+import { LineTool } from './line.js?v=29';
+import { GrabTool } from './grab.js?v=29';
 
 export class ToolManager {
     constructor(app) {

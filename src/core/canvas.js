@@ -198,14 +198,23 @@ export class CanvasManager {
             this.shapeCtx.restore();
         }
 
-        // Draw selection highlight if any shape is selected (grab tool)
+        // === Composite offscreen shapes onto main canvas ===
+        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+        this.ctx.drawImage(this.shapeCanvas, 0, 0);
+
+        // Draw selection highlight on MAIN canvas (after composite, avoids eraser interaction)
         const grabTool = this.app.tools.tools['grab'];
         if (grabTool && grabTool.selectedShape) {
             const s = grabTool.selectedShape;
-            this.shapeCtx.save();
-            this.shapeCtx.strokeStyle = '#4a9eff';
-            this.shapeCtx.lineWidth = 2 / this.scale;
-            this.shapeCtx.setLineDash([6 / this.scale, 4 / this.scale]);
+            // Re-apply the viewport transform on the main canvas
+            this.ctx.save();
+            this.ctx.scale(this.dpr, this.dpr);
+            this.ctx.translate(this.offset.x, this.offset.y);
+            this.ctx.scale(this.scale, this.scale);
+
+            this.ctx.strokeStyle = '#4a9eff';
+            this.ctx.lineWidth = 2 / this.scale;
+            this.ctx.setLineDash([6 / this.scale, 4 / this.scale]);
 
             if (s.type === 'path' && s.points && s.points.length > 0) {
                 let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -216,16 +225,12 @@ export class CanvasManager {
                     if (p.y > maxY) maxY = p.y;
                 }
                 const pad = 4;
-                this.shapeCtx.strokeRect(minX - pad, minY - pad, maxX - minX + pad * 2, maxY - minY + pad * 2);
+                this.ctx.strokeRect(minX - pad, minY - pad, maxX - minX + pad * 2, maxY - minY + pad * 2);
             } else if (s.x !== undefined && s.width !== undefined) {
-                this.shapeCtx.strokeRect(s.x - 2, s.y - 2, s.width + 4, s.height + 4);
+                this.ctx.strokeRect(s.x - 2, s.y - 2, s.width + 4, s.height + 4);
             }
-            this.shapeCtx.restore();
+            this.ctx.restore();
         }
-
-        // === Composite offscreen shapes onto main canvas ===
-        this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-        this.ctx.drawImage(this.shapeCanvas, 0, 0);
     }
 
     drawBackground() {
