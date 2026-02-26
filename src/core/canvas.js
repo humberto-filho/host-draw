@@ -183,16 +183,43 @@ export class CanvasManager {
         this.shapeCtx.translate(this.offset.x, this.offset.y);
         this.shapeCtx.scale(this.scale, this.scale);
 
-        // Draw all shapes on offscreen canvas
-        this.app.state.shapes.forEach(shape => {
-            this.drawShape(this.shapeCtx, shape);
-        });
+        // Draw all shapes on offscreen canvas — images first (bottom layer)
+        const shapes = this.app.state.shapes;
+        const images = shapes.filter(s => s.type === 'image');
+        const others = shapes.filter(s => s.type !== 'image');
+        for (const s of images) this.drawShape(this.shapeCtx, s);
+        for (const s of others) this.drawShape(this.shapeCtx, s);
 
         // Draw preview shape if any
         if (this.app.tools.currentTool && this.app.tools.currentTool.previewShape) {
             this.shapeCtx.save();
             this.shapeCtx.globalAlpha = 0.6;
             this.drawShape(this.shapeCtx, this.app.tools.currentTool.previewShape);
+            this.shapeCtx.restore();
+        }
+
+        // Draw selection highlight if any shape is selected (grab tool)
+        const grabTool = this.app.tools.tools['grab'];
+        if (grabTool && grabTool.selectedShape) {
+            const s = grabTool.selectedShape;
+            this.shapeCtx.save();
+            this.shapeCtx.strokeStyle = '#4a9eff';
+            this.shapeCtx.lineWidth = 2 / this.scale;
+            this.shapeCtx.setLineDash([6 / this.scale, 4 / this.scale]);
+
+            if (s.type === 'path' && s.points && s.points.length > 0) {
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const p of s.points) {
+                    if (p.x < minX) minX = p.x;
+                    if (p.y < minY) minY = p.y;
+                    if (p.x > maxX) maxX = p.x;
+                    if (p.y > maxY) maxY = p.y;
+                }
+                const pad = 4;
+                this.shapeCtx.strokeRect(minX - pad, minY - pad, maxX - minX + pad * 2, maxY - minY + pad * 2);
+            } else if (s.x !== undefined && s.width !== undefined) {
+                this.shapeCtx.strokeRect(s.x - 2, s.y - 2, s.width + 4, s.height + 4);
+            }
             this.shapeCtx.restore();
         }
 
@@ -242,12 +269,35 @@ export class CanvasManager {
 
     drawShape(ctx, shape) {
         ctx.save();
-        ctx.beginPath();
 
         // Handle Eraser Mode
         if (shape.composite) {
             ctx.globalCompositeOperation = shape.composite;
         }
+
+        // ── Image shapes ──
+        if (shape.type === 'image') {
+            // Use image cache to avoid creating new Image() every frame
+            if (!this._imageCache) this._imageCache = {};
+            const cacheKey = shape.src.slice(0, 64); // use prefix as key
+
+            if (this._imageCache[cacheKey]) {
+                const img = this._imageCache[cacheKey];
+                if (img.complete && img.naturalWidth > 0) {
+                    ctx.drawImage(img, shape.x, shape.y, shape.width, shape.height);
+                }
+            } else {
+                const img = new Image();
+                img.onload = () => this.render();
+                img.src = shape.src;
+                this._imageCache[cacheKey] = img;
+            }
+            ctx.restore();
+            return;
+        }
+
+        // ── Vector shapes ──
+        ctx.beginPath();
 
         // Apply Styles
         ctx.strokeStyle = shape.stroke || '#000000';
@@ -266,12 +316,6 @@ export class CanvasManager {
         } else if (shape.type === 'circle') {
             const radius = Math.sqrt(Math.pow(shape.width, 2) + Math.pow(shape.height, 2)) / 2;
             ctx.arc(shape.x + shape.width / 2, shape.y + shape.height / 2, Math.abs(radius), 0, 2 * Math.PI);
-        } else if (shape.type === 'image') {
-            const img = new Image();
-            img.src = shape.src;
-            if (img.complete) {
-                ctx.drawImage(img, shape.x, shape.y, shape.width, shape.height);
-            }
         }
 
         if (shape.fill && shape.fill !== 'transparent') {

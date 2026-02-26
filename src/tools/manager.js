@@ -1,8 +1,9 @@
-import { PencilTool } from './pencil.js?v=8';
-import { RectangleTool } from './rectangle.js?v=8';
-import { CircleTool } from './circle.js?v=8';
-import { EraserTool } from './eraser.js?v=8';
-import { LineTool } from './line.js?v=8';
+import { PencilTool } from './pencil.js?v=27';
+import { RectangleTool } from './rectangle.js?v=27';
+import { CircleTool } from './circle.js?v=27';
+import { EraserTool } from './eraser.js?v=27';
+import { LineTool } from './line.js?v=27';
+import { GrabTool } from './grab.js?v=27';
 
 export class ToolManager {
     constructor(app) {
@@ -25,6 +26,7 @@ export class ToolManager {
         this.registerTool(new LineTool(this.app));
         this.registerTool(new RectangleTool(this.app));
         this.registerTool(new CircleTool(this.app));
+        this.registerTool(new GrabTool(this.app));
 
         this.setTool('pencil');
     }
@@ -90,13 +92,18 @@ export class ToolManager {
             const url = `data:image/svg+xml;utf8,${svg.replace(/\n/g, '')}`;
             canvas.style.cursor = `url('${url}') 0 ${size - 8}, auto`;
         } else if (name === 'eraser') {
-            const svg = `
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <circle cx="16" cy="16" r="8" stroke="white" stroke-width="3" opacity="0.8"/>
-  <circle cx="16" cy="16" r="8" stroke="black" stroke-width="1.5"/>
-</svg>`;
-            const url = `data:image/svg+xml;utf8,${svg.replace(/\n/g, '')}`;
-            canvas.style.cursor = `url('${url}') 16 16, auto`;
+            // Eraser draws at strokeWidth * 4 — cursor reflects that circle
+            // Browser max cursor size is 128×128px, so cap radius at 58 (dim = 124)
+            const eraserDraw = strokeW * 4;
+            const r = Math.min(Math.round(eraserDraw / 2), 58);
+            const pad = 4;
+            const dim = (r + pad) * 2;
+            const cx = r + pad;
+            const svg = `<svg width="${dim}" height="${dim}" viewBox="0 0 ${dim} ${dim}" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="${cx}" cy="${cx}" r="${r}" stroke="white" stroke-width="3" opacity="0.8"/><circle cx="${cx}" cy="${cx}" r="${r}" stroke="black" stroke-width="1.5"/></svg>`;
+            const url = `data:image/svg+xml;utf8,${svg}`;
+            canvas.style.cursor = `url('${url}') ${cx} ${cx}, auto`;
+        } else if (name === 'grab') {
+            canvas.style.cursor = 'grab';
         }
     }
 

@@ -36,7 +36,8 @@ export class HUD {
             'Colors': [],
             'Strokes': [],
             'Theme': [],
-            'Edit': []
+            'Edit': [],
+            'File': []
         };
 
         const colorNames = {
@@ -63,7 +64,18 @@ export class HUD {
             }
             else if (cmd.startsWith('set.theme.')) groups['Theme'].push(`${key}: ${cmd.split('.')[2]}`);
             else if (cmd.startsWith('edit.')) groups['Edit'].push(`${key}: ${cmd.split('.')[1]}`);
+            else if (cmd === 'file.save') groups['File'].push(`${key}: save PDF`);
+            else if (cmd === 'file.load') groups['File'].push(`${key}: open`);
+            else if (cmd === 'color.delete') groups['File'].push(`${key}: delete color`);
         }
+
+        // Static hints for paste/image
+        groups['File'].push('ctrl+v: paste image');
+        groups['File'].push('(+): insert image');
+
+        // Grab tool hints
+        groups['Edit'].push('ctrl+c: copy (grab)');
+        groups['Edit'].push('del: delete (grab)');
 
         // Dynamic right-click stroke indicator
         const currentWidth = this.app.tools ? this.app.tools.style.strokeWidth : 2;

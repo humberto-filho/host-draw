@@ -82,11 +82,21 @@ canvas {
     color: var(--fg-color);
     border: 1px solid var(--panel-border);
     border-radius: 4px;
-    padding: 8px 14px;
+    padding: 4px 14px;
     cursor: pointer;
     font-family: var(--font-mono);
     font-size: 13px;
     transition: background 0.15s, color 0.15s;
+    text-align: center;
+    box-sizing: border-box;
+    height: 46px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#toolbar .tool-btn {
+    width: 90px;
 }
 
 #toolbar button:hover {
