@@ -1,3 +1,5 @@
+const STORAGE_KEY = 'hostdraw_shapes';
+
 export class StateManager {
     constructor(app) {
         this.app = app;
@@ -5,6 +7,30 @@ export class StateManager {
         this.history = [];
         this.historyIndex = -1;
         this.clipboard = null;
+    }
+
+    /** Load saved drawing from localStorage on startup */
+    loadFromStorage() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) {
+                this.shapes = JSON.parse(saved);
+                this.saveState();
+                console.log(`Restored ${this.shapes.length} shapes from cache`);
+            }
+        } catch (e) {
+            console.warn('Failed to restore drawing from cache:', e);
+        }
+    }
+
+    /** Persist current shapes to localStorage */
+    persistToStorage() {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(this.shapes));
+        } catch (e) {
+            // localStorage full (likely large images) — silently fail
+            console.warn('Failed to save to cache (storage full?):', e);
+        }
     }
 
     addShape(shape) {
@@ -27,37 +53,37 @@ export class StateManager {
             this.history.shift();
             this.historyIndex--;
         }
+
+        // Auto-save to browser cache
+        this.persistToStorage();
     }
 
     undo() {
         if (this.historyIndex > 0) {
             this.historyIndex--;
             this.shapes = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
+            this.persistToStorage();
             this.app.canvas.render();
             console.log("Undo");
         } else if (this.historyIndex === 0) {
             this.historyIndex = -1;
             this.shapes = [];
+            this.persistToStorage();
             this.app.canvas.render();
             console.log("Undo to empty");
         }
     }
 
-    // Basic clipboard implementation (in-memory for now)
     copy() {
-        // Todo: implement selection. For now, copy last shape?
-        // Real logic needs a "Selection tool" or explicit selection state
-        // creating a simple stub for now
-        console.log("Copy - needs selection implementation");
+        console.log("Copy - use grab tool (g) then Ctrl+C");
     }
 
     paste() {
-        console.log("Paste - needs selection implementation");
+        console.log("Paste - use grab tool (g) then Ctrl+V");
     }
 
     deleteSelection() {
-        // Needs selection logic
-        console.log("Delete - needs selection implementation");
+        console.log("Delete - use grab tool (g) then Delete key");
     }
 
     clear() {
@@ -66,8 +92,6 @@ export class StateManager {
     }
 
     uploadImage(file) {
-        // Todo: Implement upload (POST /api/save)
-        // this.app.api.upload(file)...
         console.log("Image added to state (in-memory base64). Persistence pending.");
     }
 }

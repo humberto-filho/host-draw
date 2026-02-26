@@ -10,7 +10,7 @@ export class App {
         try {
             console.log("Initializing Host-Draw...");
 
-            const v = '?v=29';
+            const v = '?v=30';
             const { CanvasManager } = await import(`./canvas.js${v}`);
             const { StateManager } = await import(`./state.js${v}`);
             const { ToolManager } = await import(`../tools/manager.js${v}`);
@@ -25,6 +25,7 @@ export class App {
 
             this.commands = new CommandRegistry(this);
             this.state = new StateManager(this);
+            this.state.loadFromStorage();
             this.canvas = new CanvasManager(this);
             this.tools = new ToolManager(this);
             this.ui = new UIManager(this);
