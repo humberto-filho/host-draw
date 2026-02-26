@@ -13,6 +13,8 @@ An online app for drawing inspired by Miro or Excalidraw, designed to be highly 
 2. **Open in Browser**:
    Navigate to [http://localhost:8000](http://localhost:8000)
 
+3. **Add the folder data at the root of the project**
+
 ## Features
 - [x] Pencil Tool
 - [x] Rectangle & Circle Tools
