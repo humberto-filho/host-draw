@@ -31,6 +31,14 @@ body {
     height: 100vh;
 }
 
+/* A selected tool supplies its own indicator; never show the OS pointer too. */
+html.tool-cursor-active,
+html.tool-cursor-active body,
+html.tool-cursor-active #app,
+html.tool-cursor-active #app * {
+    cursor: none !important;
+}
+
 #app {
     position: relative;
     width: 100%;
@@ -104,6 +112,20 @@ canvas {
     color: #282828;
 }
 
+/* Live project memory usage */
+#memory-meter {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 20;
+    pointer-events: none;
+    padding: 6px 9px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-color);
+}
+
 /* Color palette - vertical bar on left */
 #color-palette {
     pointer-events: auto;
@@ -114,22 +136,23 @@ canvas {
     z-index: 20;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     align-items: center;
     background: var(--panel-bg);
     border: 1px solid var(--panel-border);
     border-radius: 4px;
-    padding: 12px 6px;
+    padding: 14px 9px;
 }
 
 .color-item {
+    position: relative;
     display: flex;
     flex-direction: row-reverse;
     /* Label on left of swatch */
     align-items: center;
-    gap: 8px;
+    gap: 9px;
     cursor: pointer;
-    padding: 2px;
+    padding: 3px;
     border-radius: 4px;
     transition: background 0.15s;
 }
@@ -139,8 +162,8 @@ canvas {
 }
 
 .color-swatch {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, 0.15);
     flex-shrink: 0;
@@ -148,10 +171,53 @@ canvas {
 
 .color-label {
     font-family: var(--font-mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--fg-color);
     width: 10px;
     text-align: center;
+}
+
+.color-remove {
+    position: absolute;
+    top: -5px;
+    right: -6px;
+    z-index: 1;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    background: #dc2626;
+    color: #ffffff;
+    cursor: pointer;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.75);
+    transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease;
+}
+
+.color-item:hover .color-remove,
+.color-remove:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
+}
+
+.color-remove:hover {
+    background: #b91c1c;
+    transform: scale(1.18);
+}
+
+.color-remove:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 1px;
 }
 
 /* Status bar */

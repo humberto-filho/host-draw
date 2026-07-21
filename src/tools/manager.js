@@ -1,15 +1,16 @@
-import { PencilTool } from './pencil.js?v=31';
-import { RectangleTool } from './rectangle.js?v=31';
-import { CircleTool } from './circle.js?v=31';
-import { EraserTool } from './eraser.js?v=31';
-import { LineTool } from './line.js?v=31';
-import { GrabTool } from './grab.js?v=31';
-
+// ToolManager is now a JS facade: the actual tools live in the Go/WASM core.
+// It keeps the style state (owned by the UI) and the custom cursors.
 export class ToolManager {
     constructor(app) {
         this.app = app;
         this.tools = {};
         this.currentTool = null;
+        this.pencilCursor = null;
+        this.pencilCursorPath = null;
+        this.pencilCursorSize = 32;
+        this.eraserCursor = null;
+        this.eraserCursorSize = 24;
+        this.shapeCursors = {};
 
         // Active visual style
         this.style = {
@@ -20,39 +21,176 @@ export class ToolManager {
     }
 
     init() {
-        // Register Tools
-        this.registerTool(new PencilTool(this.app));
-        this.registerTool(new EraserTool(this.app));
-        this.registerTool(new LineTool(this.app));
-        this.registerTool(new RectangleTool(this.app));
-        this.registerTool(new CircleTool(this.app));
-        this.registerTool(new GrabTool(this.app));
-
         this.setTool('pencil');
     }
 
-    registerTool(tool) {
-        this.tools[tool.name] = tool;
+    setTool(name) {
+        const previousTool = this.currentTool ? this.currentTool.name : null;
+        this.currentTool = { name };
+        document.documentElement.classList.add('tool-cursor-active');
+        if (name === 'eraser' && previousTool !== 'eraser') {
+            // Eraser width is multiplied by four in the drawing core.
+            this.style.strokeWidth = 9; // 36px erase area: Small
+            this.app.eraserSizeIndex = 0;
+        }
+        window.hostdraw.setTool(name);
+        this.updateCursor();
+
+        // Re-render toolbar to update active state
+        if (this.app.ui && this.app.ui.toolbar) {
+            this.app.ui.toolbar.render();
+        }
     }
 
-    setTool(name) {
-        if (this.currentTool) {
-            this.currentTool.deactivate();
-        }
+    // Push the JS-owned style into the core (called before strokes start)
+    syncStyle() {
+        window.hostdraw.setStyle(this.style.strokeColor, this.style.strokeWidth);
+    }
 
-        const tool = this.tools[name];
-        if (tool) {
-            this.currentTool = tool;
-            this.currentTool.activate();
-            this.updateCursor();
+    ensurePencilCursor() {
+        if (this.pencilCursor) return;
 
-            // Re-render toolbar to update active state
-            if (this.app.ui && this.app.ui.toolbar) {
-                this.app.ui.toolbar.render();
-            }
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const cursor = document.createElementNS(svgNS, 'svg');
+        cursor.setAttribute('viewBox', '0 0 24 24');
+        cursor.setAttribute('aria-hidden', 'true');
+        cursor.style.cssText = [
+            'position: fixed',
+            'display: none',
+            'pointer-events: none',
+            'z-index: 2147483647',
+            'overflow: visible'
+        ].join(';');
+
+        const path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', 'M4 17.4V20h2.6L18.7 7.9l-2.6-2.6L4 17.4Zm15.3-11L17.1 4.2l1-1a1.55 1.55 0 0 1 2.2 2.2l-1 1Z');
+        cursor.appendChild(path);
+        document.body.appendChild(cursor);
+
+        this.pencilCursor = cursor;
+        this.pencilCursorPath = path;
+
+        const canvas = this.app.canvas.canvas;
+        canvas.addEventListener('mousemove', (event) => {
+            if (!this.currentTool || this.currentTool.name !== 'pencil') return;
+
+            const size = this.pencilCursorSize;
+            // The pencil point is at (4, 20) in the 24×24 viewBox.
+            cursor.style.left = `${event.clientX - size * (4 / 24)}px`;
+            cursor.style.top = `${event.clientY - size * (20 / 24)}px`;
+            cursor.style.display = 'block';
+        });
+        canvas.addEventListener('mouseleave', () => {
+            cursor.style.display = 'none';
+        });
+    }
+
+    ensureEraserCursor() {
+        if (this.eraserCursor) return;
+
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const cursor = document.createElementNS(svgNS, 'svg');
+        cursor.setAttribute('viewBox', '0 0 100 100');
+        cursor.setAttribute('aria-hidden', 'true');
+        cursor.style.cssText = [
+            'position: fixed',
+            'display: none',
+            'pointer-events: none',
+            'z-index: 2147483647',
+            'overflow: visible'
+        ].join(';');
+
+        const circle = document.createElementNS(svgNS, 'circle');
+        circle.setAttribute('cx', '50');
+        circle.setAttribute('cy', '50');
+        circle.setAttribute('r', '48');
+        circle.setAttribute('fill', 'none');
+        circle.setAttribute('stroke', 'var(--fg-color)');
+        circle.setAttribute('stroke-width', '4');
+        cursor.appendChild(circle);
+        document.body.appendChild(cursor);
+
+        this.eraserCursor = cursor;
+
+        const canvas = this.app.canvas.canvas;
+        canvas.addEventListener('mousemove', (event) => {
+            if (!this.currentTool || this.currentTool.name !== 'eraser') return;
+
+            const size = this.eraserCursorSize;
+            cursor.style.left = `${event.clientX - size / 2}px`;
+            cursor.style.top = `${event.clientY - size / 2}px`;
+            cursor.style.display = 'block';
+        });
+        canvas.addEventListener('mouseleave', () => {
+            cursor.style.display = 'none';
+        });
+    }
+
+    ensureShapeCursor(name) {
+        if (this.shapeCursors[name]) return this.shapeCursors[name];
+
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const cursor = document.createElementNS(svgNS, 'svg');
+        cursor.setAttribute('viewBox', '0 0 24 24');
+        cursor.setAttribute('width', '28');
+        cursor.setAttribute('height', '28');
+        cursor.setAttribute('aria-hidden', 'true');
+        cursor.style.cssText = [
+            'position: fixed',
+            'display: none',
+            'pointer-events: none',
+            'z-index: 2147483647',
+            'overflow: visible'
+        ].join(';');
+
+        let shape;
+        if (name === 'line') {
+            shape = document.createElementNS(svgNS, 'line');
+            shape.setAttribute('x1', '5');
+            shape.setAttribute('y1', '19');
+            shape.setAttribute('x2', '19');
+            shape.setAttribute('y2', '5');
+            shape.setAttribute('stroke-linecap', 'round');
+            shape.setAttribute('stroke-width', '2.5');
+        } else if (name === 'rectangle') {
+            shape = document.createElementNS(svgNS, 'rect');
+            shape.setAttribute('x', '4');
+            shape.setAttribute('y', '5');
+            shape.setAttribute('width', '16');
+            shape.setAttribute('height', '14');
+            shape.setAttribute('rx', '1');
+            shape.setAttribute('fill', 'none');
+            shape.setAttribute('stroke-width', '2');
+        } else if (name === 'circle') {
+            shape = document.createElementNS(svgNS, 'circle');
+            shape.setAttribute('cx', '12');
+            shape.setAttribute('cy', '12');
+            shape.setAttribute('r', '8');
+            shape.setAttribute('fill', 'none');
+            shape.setAttribute('stroke-width', '2');
         } else {
-            console.error(`Tool not found: ${name}`);
+            shape = document.createElementNS(svgNS, 'path');
+            shape.setAttribute('d', 'M12 2l3.5 3.5H13V11h5.5V8.5L22 12l-3.5 3.5V13H13v5.5h2.5L12 22l-3.5-3.5H11V13H5.5v2.5L2 12l3.5-3.5V11H11V5.5H8.5L12 2Z');
         }
+
+        cursor.appendChild(shape);
+        document.body.appendChild(cursor);
+        const entry = { cursor, shape, size: 28 };
+        this.shapeCursors[name] = entry;
+
+        const canvas = this.app.canvas.canvas;
+        canvas.addEventListener('mousemove', (event) => {
+            if (!this.currentTool || this.currentTool.name !== name) return;
+
+            cursor.style.left = `${event.clientX - entry.size / 2}px`;
+            cursor.style.top = `${event.clientY - entry.size / 2}px`;
+            cursor.style.display = 'block';
+        });
+        canvas.addEventListener('mouseleave', () => {
+            cursor.style.display = 'none';
+        });
+
+        return entry;
     }
 
     updateCursor() {
@@ -62,93 +200,63 @@ export class ToolManager {
 
         // Remove old classes
         canvas.classList.remove('cursor-pencil');
+        canvas.style.removeProperty('cursor');
         canvas.style.cursor = 'default';
+        if (this.pencilCursor) this.pencilCursor.style.display = 'none';
+        if (this.eraserCursor) this.eraserCursor.style.display = 'none';
+        Object.values(this.shapeCursors).forEach(({ cursor }) => {
+            cursor.style.display = 'none';
+        });
 
         if (name === 'pencil') {
-            // Encode color for SVG
-            let color = this.style.strokeColor;
-            if (color.startsWith('#')) {
-                color = encodeURIComponent(color);
-            }
+            const color = this.style.strokeColor;
+            const size = strokeW > 3 ? 44 : 32;
 
-            const size = strokeW > 5 ? 40 : 32;
-
-            const svg = `
-<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <filter id="shadow">
-      <feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="white" flood-opacity="0.8"/>
-    </filter>
-  </defs>
-  <path d="M18 3L21 6" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
-  <path d="M3 21H6L19.5 7.5L16.5 4.5L3 18V21Z" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
-  
-  <path d="M18 3L21 6" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M3 21H6L19.5 7.5L16.5 4.5L3 18V21Z" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M3 21L6 24L9 21" fill="${color}"/>
-</svg>`;
-
-            const url = `data:image/svg+xml;utf8,${svg.replace(/\n/g, '')}`;
-            canvas.style.cursor = `url('${url}') 0 ${size - 8}, auto`;
+            // Render as a normal DOM SVG instead of an OS cursor bitmap. Some
+            // Linux cursor pipelines swap red/blue channels in colored cursors.
+            this.ensurePencilCursor();
+            this.pencilCursorSize = size;
+            this.pencilCursor.setAttribute('width', size);
+            this.pencilCursor.setAttribute('height', size);
+            this.pencilCursorPath.setAttribute('fill', color);
+            canvas.style.setProperty('cursor', 'none', 'important');
         } else if (name === 'line') {
-            let color = this.style.strokeColor;
-            if (color.startsWith('#')) {
-                color = encodeURIComponent(color);
-            }
-
-            const size = 32;
-            const svg = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><line x1="4" y1="20" x2="20" y2="4" stroke="white" stroke-width="3" stroke-linecap="round" opacity="0.8"/><line x1="4" y1="20" x2="20" y2="4" stroke="${color}" stroke-width="1.5" stroke-linecap="round"/><circle cx="4" cy="20" r="2" fill="${color}"/><circle cx="20" cy="4" r="2" fill="${color}"/></svg>`;
-
-            const url = `data:image/svg+xml;utf8,${svg}`;
-            canvas.style.cursor = `url('${url}') 4 20, crosshair`;
+            const entry = this.ensureShapeCursor('line');
+            const { cursor, shape } = entry;
+            entry.size = strokeW > 3 ? 44 : 28;
+            cursor.setAttribute('width', entry.size);
+            cursor.setAttribute('height', entry.size);
+            shape.setAttribute('stroke', this.style.strokeColor);
+            shape.setAttribute('stroke-width', strokeW > 3 ? '3.5' : '2.5');
+            canvas.style.setProperty('cursor', 'none', 'important');
         } else if (name === 'eraser') {
-            // Eraser draws at strokeWidth * 4 — cursor reflects that circle
-            // Browser max cursor size is 128×128px, so cap radius at 58 (dim = 124)
-            const eraserDraw = strokeW * 4;
-            const r = Math.min(Math.round(eraserDraw / 2), 58);
-            const pad = 4;
-            const dim = (r + pad) * 2;
-            const cx = r + pad;
-            const svg = `<svg width="${dim}" height="${dim}" viewBox="0 0 ${dim} ${dim}" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="${cx}" cy="${cx}" r="${r}" stroke="white" stroke-width="3" opacity="0.8"/><circle cx="${cx}" cy="${cx}" r="${r}" stroke="black" stroke-width="1.5"/></svg>`;
-            const url = `data:image/svg+xml;utf8,${svg}`;
-            canvas.style.cursor = `url('${url}') ${cx} ${cx}, auto`;
+            // The simple circle shows the exact area that will be erased.
+            this.ensureEraserCursor();
+            this.eraserCursorSize = strokeW * 4;
+            this.eraserCursor.setAttribute('width', this.eraserCursorSize);
+            this.eraserCursor.setAttribute('height', this.eraserCursorSize);
+            // Override any previous native cursor image (such as the line
+            // cursor) so only this eraser indicator is visible.
+            canvas.style.setProperty('cursor', 'none', 'important');
+        } else if (name === 'rectangle' || name === 'circle') {
+            const entry = this.ensureShapeCursor(name);
+            const { cursor, shape } = entry;
+            entry.size = strokeW > 3 ? 44 : 28;
+            cursor.setAttribute('width', entry.size);
+            cursor.setAttribute('height', entry.size);
+            shape.setAttribute('stroke', this.style.strokeColor);
+            shape.setAttribute('stroke-width', strokeW > 3 ? '3' : '2');
+            canvas.style.setProperty('cursor', 'none', 'important');
         } else if (name === 'grab') {
-            canvas.style.cursor = 'grab';
+            const entry = this.ensureShapeCursor('grab');
+            entry.size = 28;
+            entry.cursor.setAttribute('width', entry.size);
+            entry.cursor.setAttribute('height', entry.size);
+            entry.shape.setAttribute('fill', 'var(--fg-color)');
+            canvas.style.setProperty('cursor', 'none', 'important');
         }
     }
 
-    handleEvent(type, e) {
-        if (!this.currentTool) return;
-
-        const { x, y } = this.getPointerPos(e);
-        const event = { originalEvent: e, x, y };
-
-        switch (type) {
-            case 'mousedown': this.currentTool.onMouseDown(event); break;
-            case 'mousemove': this.currentTool.onMouseMove(event); break;
-            case 'mouseup': this.currentTool.onMouseUp(event); break;
-            case 'keydown': this.currentTool.onKeyDown(event); break;
-            case 'keyup': this.currentTool.onKeyUp(event); break;
-        }
-    }
-
-    getPointerPos(e) {
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-
-        const rect = this.app.canvas.canvas.getBoundingClientRect();
-
-        const screenX = clientX - rect.left;
-        const screenY = clientY - rect.top;
-
-        const worldX = (screenX - this.app.canvas.offset.x) / this.app.canvas.scale;
-        const worldY = (screenY - this.app.canvas.offset.y) / this.app.canvas.scale;
-
-        return { x: worldX, y: worldY };
-    }
+    // Input events flow straight to the WASM core via canvas.js now.
+    handleEvent() { }
 }

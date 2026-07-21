@@ -13,12 +13,30 @@ if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
 
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
+    # Serve .wasm with the correct MIME so instantiateStreaming works
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        '.wasm': 'application/wasm',
+    }
+
+    def handle_one_request(self):
+        # Browsers routinely close connections mid-transfer (cancelled
+        # downloads, refreshes); don't spam a traceback for it.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def do_GET(self):
         parsed_path = urlparse(self.path)
         if parsed_path.path == '/api/list':
             self.handle_list()
         elif parsed_path.path.startswith('/api/load'):
             self.handle_load(parsed_path)
+        elif parsed_path.path == '/favicon.ico':
+            # No favicon; answer 204 instead of a noisy 404
+            self.send_response(204)
+            self.end_headers()
         else:
             super().do_GET()
 

@@ -1,7 +1,6 @@
 export class App {
     constructor() {
         this.canvas = null;
-        this.state = null;
         this.tools = null;
         this.ui = null;
     }
@@ -10,13 +9,13 @@ export class App {
         try {
             console.log("Initializing Host-Draw...");
 
-            const v = '?v=31';
+            const v = '?v=54';
             const { CanvasManager } = await import(`./canvas.js${v}`);
-            const { StateManager } = await import(`./state.js${v}`);
             const { ToolManager } = await import(`../tools/manager.js${v}`);
             const { UIManager } = await import(`../ui/manager.js${v}`);
             const { ConfigManager } = await import(`../utils/config.js${v}`);
             const { CommandRegistry } = await import(`./commands.js${v}`);
+            const { loadWasmCore } = await import('./wasm_loader.js?v=38');
 
             this.config = new ConfigManager();
             await this.config.load();
@@ -24,11 +23,28 @@ export class App {
             this.applyThemeFromConfig();
 
             this.commands = new CommandRegistry(this);
-            this.state = new StateManager(this);
-            this.state.loadFromStorage();
             this.canvas = new CanvasManager(this);
             this.tools = new ToolManager(this);
             this.ui = new UIManager(this);
+
+            // Boot the Go/WASM drawing core (owns scene, tools, rendering)
+            await loadWasmCore();
+            const theme = this.config.get('theme') || {};
+            const wasmErr = window.hostdraw.init('main-canvas', JSON.stringify(theme), {
+                stateChanged: (json) => this.persistShapes(json),
+                popup: (msg) => this.showPopup(msg),
+                selectionChanged: () => { }
+            });
+            if (wasmErr) throw new Error(wasmErr);
+
+            // A drawing selected before reload replaces the cached document.
+            const pendingDrawing = sessionStorage.getItem('hostdraw_pending_drawing');
+            if (pendingDrawing) sessionStorage.removeItem('hostdraw_pending_drawing');
+
+            if (!pendingDrawing) {
+                const saved = localStorage.getItem('hostdraw_shapes');
+                if (saved) window.hostdraw.importShapes(saved);
+            }
 
             this.canvas.init();
             this.tools.init();
@@ -40,7 +56,7 @@ export class App {
             this.commands.register('tool.rectangle', 'Select Rectangle Tool', () => this.tools.setTool('rectangle'));
             this.commands.register('tool.circle', 'Select Circle Tool', () => this.tools.setTool('circle'));
             this.commands.register('tool.grab', 'Select Grab Tool', () => this.tools.setTool('grab'));
-            this.commands.register('edit.undo', 'Undo Last Action', () => this.state.undo());
+            this.commands.register('edit.undo', 'Undo Last Action', () => window.hostdraw.undo());
             this.commands.register('file.save', 'Save as PDF', () => this.saveAsPDF());
             this.commands.register('file.load', 'Load Drawing', () => this.showLoadPopup());
             this.commands.register('file.add-color', 'Add Custom Color', () => this.openColorPicker());
@@ -62,13 +78,20 @@ export class App {
                 }
             }
 
+            // Reset to the default color state: theme Ink (palette swatch 1),
+            // so the pencil matches the active palette color from the start
+            this.commands.execute('set.color.1');
+            this.tools.syncStyle();
+
             this.ui.init();
 
             window.addEventListener('keydown', (e) => this.commands.handleKey(e));
 
             // Right Click: toggle stroke OR eraser size
             this.eraserSizeIndex = 0;
-            const eraserSizes = [10, 20, 40];
+            // The eraser tool applies a 4× multiplier, yielding 36, 80 and
+            // 192px erasing circles: 50%, 100% and 200% larger respectively.
+            const eraserSizes = [9, 20, 48];
             window.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
                 const toolName = this.tools.currentTool ? this.tools.currentTool.name : '';
@@ -82,12 +105,15 @@ export class App {
                     const next = current > 3 ? 2 : 4;
                     this.tools.style.strokeWidth = next;
                 }
+                this.tools.syncStyle();
                 this.tools.updateCursor();
                 if (this.ui && this.ui.hud) this.ui.hud.render();
             });
 
             // Ctrl+V paste — images from clipboard
             window.addEventListener('paste', (e) => this.handlePaste(e));
+
+            if (pendingDrawing) await this.loadDrawing(pendingDrawing);
 
             console.log("Host-Draw initialized.");
         } catch (e) {
@@ -168,18 +194,9 @@ export class App {
                 }
 
                 // Place at center of current viewport
-                const cx = (this.canvas.width / 2 - this.canvas.offset.x) / this.canvas.scale;
-                const cy = (this.canvas.height / 2 - this.canvas.offset.y) / this.canvas.scale;
+                const [cx, cy] = window.hostdraw.centerWorld();
 
-                this.state.addShape({
-                    type: 'image',
-                    x: cx - w / 2,
-                    y: cy - h / 2,
-                    width: w,
-                    height: h,
-                    src: evt.target.result
-                });
-                this.canvas.render();
+                window.hostdraw.addImage(evt.target.result, cx - w / 2, cy - h / 2, w, h);
                 this.showPopup('Image added');
             };
             img.src = evt.target.result;
@@ -392,18 +409,27 @@ export class App {
 
     async deleteCustomColor(index) {
         const BUILTIN_COUNT = 6;
-        if (index < BUILTIN_COUNT) return;
+        if (!Number.isInteger(index) || index < BUILTIN_COUNT) return;
 
         const themeColors = this.config.get('presets.themeColors');
         if (!themeColors) return;
+        if (index >= Math.min(themeColors.light.length, themeColors.dark.length)) return;
 
         themeColors.light.splice(index, 1);
         themeColors.dark.splice(index, 1);
 
-        const oldKey = String(index + 1);
-        if (parseInt(oldKey) <= 9) {
-            delete this.config.settings.keybindings[oldKey];
-            delete this.commands.keybindings[oldKey];
+        // Rebuild the custom-color number shortcuts because colors after the
+        // removed entry shift down by one position.
+        for (let colorNumber = BUILTIN_COUNT + 1; colorNumber <= 9; colorNumber++) {
+            const key = String(colorNumber);
+            const commandId = `set.color.${colorNumber}`;
+            delete this.config.settings.keybindings[key];
+            delete this.commands.keybindings[key];
+
+            if (colorNumber <= themeColors.light.length) {
+                this.config.settings.keybindings[key] = commandId;
+                this.commands.bind(key, commandId);
+            }
         }
 
         const isDark = this.ui.toolbar.isDark;
@@ -423,50 +449,31 @@ export class App {
     // ========== SAVE ==========
     async saveAsPDF() {
         try {
-            const cm = this.canvas;
-            const shapes = this.state.shapes;
-            if (shapes.length === 0) {
+            const b = window.hostdraw.bounds();
+            if (!b) {
                 this.showPopup('Nothing to save!');
                 return;
             }
 
             // Bounding box
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (const shape of shapes) {
-                if (shape.type === 'path' && shape.points) {
-                    for (const p of shape.points) {
-                        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-                        maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-                    }
-                } else if (shape.x !== undefined) {
-                    minX = Math.min(minX, shape.x); minY = Math.min(minY, shape.y);
-                    maxX = Math.max(maxX, shape.x + (shape.width || 0));
-                    maxY = Math.max(maxY, shape.y + (shape.height || 0));
-                }
-            }
-
+            let [minX, minY, maxX, maxY] = b;
             const pad = 40;
             minX -= pad; minY -= pad; maxX += pad; maxY += pad;
             const w = maxX - minX;
             const h = maxY - minY;
 
-            // Temp canvas for clean render
-            const tempCanvas = document.createElement('canvas');
+            // Render the region in the WASM core (eraser applied, like on screen)
             const scale = 2;
-            tempCanvas.width = w * scale;
-            tempCanvas.height = h * scale;
+            const pixels = window.hostdraw.exportRegion(minX, minY, w, h, scale);
+            if (typeof pixels === 'string') throw new Error(pixels);
+
+            const devW = Math.floor(w * scale);
+            const devH = Math.floor(h * scale);
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = devW;
+            tempCanvas.height = devH;
             const ctx = tempCanvas.getContext('2d');
-
-            const theme = this.config.get('theme') || {};
-            ctx.fillStyle = theme.background || '#ffffff';
-            ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-            ctx.scale(scale, scale);
-            ctx.translate(-minX, -minY);
-
-            for (const shape of shapes) {
-                if (shape.composite) continue;
-                cm.drawShape(ctx, shape);
-            }
+            ctx.putImageData(new ImageData(new Uint8ClampedArray(pixels), devW, devH), 0, 0);
 
             const imgData = tempCanvas.toDataURL('image/jpeg', 0.95);
 
@@ -492,7 +499,7 @@ export class App {
             const jsonResp = await fetch('/api/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ filename: jsonFilename, raw_json: shapes })
+                body: JSON.stringify({ filename: jsonFilename, raw_json: JSON.parse(window.hostdraw.exportShapes()) })
             });
 
             if (jsonResp.ok) {
@@ -510,7 +517,11 @@ export class App {
     async showLoadPopup() {
         // Close existing popup
         const existing = document.getElementById('load-popup');
-        if (existing) { existing.remove(); return; }
+        if (existing) {
+            if (typeof existing.closeLoadPopup === 'function') existing.closeLoadPopup();
+            else existing.remove();
+            return;
+        }
 
         try {
             const resp = await fetch('/api/list');
@@ -563,6 +574,29 @@ export class App {
 
             let selectedIndex = 0;
 
+            const returnToCanvas = () => {
+                const canvas = this.canvas?.canvas;
+                if (!canvas) return;
+                canvas.tabIndex = -1;
+                requestAnimationFrame(() => canvas.focus({ preventScroll: true }));
+            };
+
+            let handleKey;
+            const closePopup = () => {
+                overlay.remove();
+                window.removeEventListener('keydown', handleKey, true);
+                returnToCanvas();
+            };
+            overlay.closeLoadPopup = closePopup;
+
+            const selectDrawing = (filename) => {
+                closePopup();
+                // A fresh page creates a new WASM instance, returning its
+                // non-shrinkable linear memory to the baseline allocation.
+                sessionStorage.setItem('hostdraw_pending_drawing', filename);
+                window.location.reload();
+            };
+
             const items = files.map((file, index) => {
                 const item = document.createElement('div');
                 const displayName = file.filename.replace('.json', '');
@@ -580,8 +614,7 @@ export class App {
                 `;
 
                 item.addEventListener('click', () => {
-                    this.loadDrawing(file.filename);
-                    overlay.remove();
+                    selectDrawing(file.filename);
                 });
 
                 item.addEventListener('mouseenter', () => {
@@ -613,10 +646,9 @@ export class App {
             document.body.appendChild(overlay);
 
             // Keyboard navigation
-            const handleKey = (e) => {
+            handleKey = (e) => {
                 if (e.key === 'Escape') {
-                    overlay.remove();
-                    window.removeEventListener('keydown', handleKey, true);
+                    closePopup();
                     e.stopPropagation();
                 } else if (e.key === 'ArrowDown') {
                     e.preventDefault();
@@ -627,9 +659,7 @@ export class App {
                     selectedIndex = Math.max(selectedIndex - 1, 0);
                     updateSelection();
                 } else if (e.key === 'Enter') {
-                    this.loadDrawing(files[selectedIndex].filename);
-                    overlay.remove();
-                    window.removeEventListener('keydown', handleKey, true);
+                    selectDrawing(files[selectedIndex].filename);
                 }
                 e.stopPropagation();
             };
@@ -639,8 +669,7 @@ export class App {
             // Close on overlay click (not panel)
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
-                    overlay.remove();
-                    window.removeEventListener('keydown', handleKey, true);
+                    closePopup();
                 }
             });
 
@@ -658,9 +687,9 @@ export class App {
             }
             const shapes = await resp.json();
 
-            this.state.shapes = shapes;
-            this.state.saveState();
-            this.canvas.render();
+            const err = window.hostdraw.importShapes(JSON.stringify(shapes));
+            if (err) throw new Error(err);
+            this.ui?.memoryMeter?.reset();
 
             const displayName = filename.replace('.json', '');
             this.showPopup(`Loaded: ${displayName}`);
@@ -725,11 +754,16 @@ export class App {
 
     remapShapeColors(fromTheme, toTheme) {
         const mapping = this.getColorMapping(fromTheme, toTheme);
-        for (const shape of this.state.shapes) {
-            if (shape.stroke) {
-                const key = shape.stroke.toLowerCase();
-                if (mapping[key]) shape.stroke = mapping[key];
-            }
+        window.hostdraw.remapColors(JSON.stringify(mapping));
+    }
+
+    // Persist the scene (exported by the WASM core) to the browser cache
+    persistShapes(json) {
+        try {
+            localStorage.setItem('hostdraw_shapes', json);
+        } catch (e) {
+            // localStorage full (likely large images) — silently fail
+            console.warn('Failed to save to cache (storage full?):', e);
         }
     }
 
@@ -779,9 +813,9 @@ export class App {
                     this.config.settings.theme.gridBoldColor = theme.gridBold;
 
                     this.applyThemeFromConfig();
+                    window.hostdraw.setTheme(JSON.stringify(this.config.settings.theme));
                     this.remapShapeColors(prevTheme, name);
                     this.commands.execute('set.color.1');
-                    this.canvas.render();
 
                     if (this.ui.toolbar) {
                         this.ui.toolbar.isDark = (name === 'dark');

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>WASM bridge test</title>
+<style>
+    body { margin: 0; }
+    canvas { display: block; }
+    #status {
+        position: fixed; top: 8px; left: 8px; z-index: 10;
+        font: bold 16px monospace; color: #000; background: #ff0;
+        padding: 4px 8px; white-space: pre;
+    }
+</style>
+</head>
+<body>
+<canvas id="main-canvas"></canvas>
+<div id="status">LOADING</div>
+<script src="wasm_exec.js"></script>
+<script>
+// Tiny 2x2 red PNG data URL for image-shape testing
+const RED_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEklEQVR4nGP8z8DwnwEKmBgQAAA9+AED0t8OawAAAABJRU5ErkJggg==';
+
+function log(msg) {
+    document.getElementById('status').textContent = msg;
+    if (typeof dump === 'function') dump('BRIDGE-TEST: ' + msg + '\n');
+}
+
+async function main() {
+    const go = new Go();
+    const result = await WebAssembly.instantiateStreaming(fetch('main.wasm'), go.importObject);
+    go.run(result.instance);
+    const hd = window.hostdraw;
+
+    const errors = [];
+    const check = (name, cond) => { if (!cond) errors.push(name); };
+
+    const err = hd.init('main-canvas', JSON.stringify({
+        background: '#ffffff',
+        gridColor: 'rgba(0,0,0,0.1)',
+        gridBoldColor: 'rgba(0,0,0,0.2)'
+    }), { stateChanged: () => {}, popup: () => {}, selectionChanged: () => {} });
+    check('init:' + err, err === null);
+
+    hd.resize(800, 600, 1);
+
+    // Scene: pencil path, line, rectangle, circle, eraser stroke, image
+    const shapes = [
+        { type: 'path', points: [{x:50,y:100},{x:150,y:60},{x:250,y:120},{x:350,y:80}], stroke: '#cc241d', strokeWidth: 6, fill: 'transparent' },
+        { type: 'path', points: [{x:50,y:200},{x:300,y:200}], stroke: '#458588', strokeWidth: 4, fill: 'transparent' },
+        { type: 'rectangle', x: 100, y: 250, width: 150, height: 100, stroke: '#98971a', strokeWidth: 5, fill: 'transparent' },
+        { type: 'circle', x: 350, y: 250, width: 120, height: 0, stroke: '#b16286', strokeWidth: 5, fill: 'transparent' },
+        { type: 'path', points: [{x:40,y:50},{x:400,y:350}], composite: 'destination-out', stroke: '#000000', strokeWidth: 25 },
+        { type: 'image', x: 500, y: 100, width: 100, height: 100, src: RED_PNG }
+    ];
+    const impErr = hd.importShapes(JSON.stringify(shapes));
+    check('import:' + impErr, impErr === null);
+
+    // Roundtrip
+    const back = JSON.parse(hd.exportShapes());
+    check('roundtrip count', back.length === 6);
+    check('roundtrip eraser', back[4].composite === 'destination-out');
+
+    // Bounds
+    const b = hd.bounds();
+    check('bounds', Array.isArray(b) && b.length === 4);
+
+    // exportRegion returns pixels of the right size
+    const px = hd.exportRegion(0, 0, 400, 300, 1);
+    check('exportRegion', px instanceof Uint8Array && px.length === 400 * 300 * 4);
+
+    // Tool smoke: draw a pencil stroke via the bridge (6 -> 7 shapes)
+    hd.setTool('pencil');
+    hd.setStyle('#282828', 4);
+    hd.pointerDown(600, 400, 0, false);
+    hd.pointerMove(650, 450);
+    hd.pointerMove(700, 420);
+    hd.pointerUp(700, 420, 0);
+    check('pencil stroke', JSON.parse(hd.exportShapes()).length === 7);
+
+    // Undo removes the stroke just drawn (7 -> 6)
+    hd.undo();
+    check('undo', JSON.parse(hd.exportShapes()).length === 6);
+
+    // Grab: hit-test the first path, drag it by (+10, +10)
+    hd.setTool('grab');
+    hd.pointerDown(150, 60, 0, false);
+    hd.pointerMove(160, 70);
+    hd.pointerUp(160, 70, 0);
+    const afterDrag = JSON.parse(hd.exportShapes());
+    check('grab drag', Math.abs(afterDrag[0].points[1].x - 160) < 1e-6 && Math.abs(afterDrag[0].points[1].y - 70) < 1e-6);
+
+    // Undo the move
+    hd.undo();
+    const afterUndo = JSON.parse(hd.exportShapes());
+    check('undo move', Math.abs(afterUndo[0].points[1].x - 150) < 1e-6);
+
+    // Orientation: a red rect near the world top must appear near the
+    // top rows of the exported pixel buffer (not mirrored)
+    hd.importShapes(JSON.stringify([
+        { type: 'rectangle', x: 10, y: 10, width: 380, height: 30, stroke: '#ff0000', strokeWidth: 20, fill: 'transparent' }
+    ]));
+    const opx = hd.exportRegion(0, 0, 400, 300, 1);
+    let topRed = 0, bottomRed = 0;
+    for (let y = 0; y < 300; y++) {
+        for (let x = 0; x < 400; x++) {
+            const i = (y * 400 + x) * 4;
+            if (opx[i] > 200 && opx[i + 1] < 100 && opx[i + 2] < 100) {
+                if (y < 150) topRed++; else bottomRed++;
+            }
+        }
+    }
+    check('stroke orientation (top stays top)', topRed > 100 && bottomRed === 0);
+
+    // Image orientation: top row red, bottom row blue
+    const oc = document.createElement('canvas');
+    oc.width = 2; oc.height = 2;
+    const octx = oc.getContext('2d');
+    octx.fillStyle = '#0000ff'; octx.fillRect(0, 0, 2, 2);
+    octx.fillStyle = '#ff0000'; octx.fillRect(0, 0, 2, 1);
+    hd.importShapes(JSON.stringify([
+        { type: 'image', x: 0, y: 100, width: 100, height: 100, src: oc.toDataURL('image/png') }
+    ]));
+    const ipx = hd.exportRegion(0, 100, 100, 100, 1);
+    const topI = (25 * 100 + 50) * 4, botI = (75 * 100 + 50) * 4;
+    check('image orientation (red above blue)',
+        ipx[topI] > 200 && ipx[topI + 2] < 100 && ipx[botI + 2] > 200 && ipx[botI] < 100);
+
+    // Render a few frames
+    for (let i = 0; i < 10; i++) {
+        hd.frame();
+        await new Promise(r => requestAnimationFrame(r));
+    }
+
+    log(errors.length === 0 ? 'BRIDGE OK (6 shapes)' : 'FAIL: ' + errors.join(', '));
+}
+
+main().catch(e => log('EXCEPTION: ' + e.message));
+</script>
+</body>
+</html>

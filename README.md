@@ -1,102 +1,188 @@
 # Host-Draw
 
-A lightweight, browser-based drawing app inspired by Miro and Excalidraw. Runs locally via a Python server with no dependencies.
+Host-Draw is a local-first drawing board that runs in the browser. Its interface is written in vanilla JavaScript, while drawing state, tools, viewport math, undo operations, image handling, and WebGL rendering run in Go compiled to WebAssembly.
 
-## How to Run
+There is no JavaScript package installation or bundling step. A small Python server serves the application and stores exported drawings locally.
 
-```powershell
-python run_server.py
+## Features
+
+- Pencil, line, rectangle, circle, eraser, and grab tools
+- Go/WASM drawing engine with a WebGL renderer
+- Operation-based undo history
+- Zooming and panning on an infinite grid
+- Shape selection, movement, deletion, copy, and paste
+- Image insertion by file picker, clipboard, or drag and drop
+- Light and dark themes with automatic stroke-color remapping
+- Six fixed palette colors plus removable custom colors
+- Automatic browser persistence through `localStorage`
+- PDF and JSON export to the local `data/` directory
+- WASM memory usage indicator
+
+## Requirements
+
+- Python 3
+- Go 1.26 or newer
+- A browser with WebAssembly and WebGL support
+
+The build script uses `.toolchain/go/bin/go` when a local toolchain exists; otherwise it uses `go` from `PATH`.
+
+## Build and run
+
+From the repository root:
+
+```bash
+./build.sh
+python3 run_server.py
 ```
 
-Open [http://localhost:8000](http://localhost:8000) in your browser.
+Then open [http://localhost:8000](http://localhost:8000).
 
-## Drawing Tools
+`build.sh` creates two generated runtime files:
 
-| Key | Tool | Description |
-|-----|------|-------------|
-| `p` | Pencil | Freehand drawing |
-| `l` | Line | Straight lines |
-| `r` | Rectangle | Rectangles |
-| `c` | Circle | Circles / ellipses |
-| `e` | Eraser | Erase strokes (size matches cursor) |
-| `g` | Grab | Select, move, copy, and delete shapes |
+- `web/main.wasm`
+- `web/wasm_exec.js`
 
-## Image Support
+Both files are intentionally ignored by Git. Run the build again whenever code under `wasm/` changes.
 
-| Action | How |
-|--------|-----|
-| Insert image | Click **➕** button in toolbar |
-| Paste image | **Ctrl+V** (from clipboard) |
-| Drag & drop | Drop an image file onto the canvas |
+## Architecture
 
-- Images render at the **bottommost layer** (drawings appear on top)
-- Large images are auto-scaled to max 800px
+```text
+Browser UI and DOM events (src/)
+              |
+              | window.hostdraw bridge
+              v
+Go WebAssembly entry point (wasm/main.go)
+              |
+       +------+------+
+       |             |
+       v             v
+ state + viewport   drawing tools
+ WebGL renderer     input handling
+   (wasm/core/)      (wasm/tools/)
+```
 
-## Grab Tool (`g`)
+The JavaScript layer owns the DOM, toolbar, palette, custom cursors, file dialogs, browser storage, and server requests. It forwards input and style changes through `window.hostdraw`.
 
-- **Click** a shape to select it (blue dashed outline)
-- **Drag** to move it
-- **Ctrl+C** → copy selected shape
-- **Ctrl+V** → paste duplicate (offset 20px each time)
-- **Delete / Backspace** → remove selected shape
-- Eraser strokes are excluded from selection
+The Go/WASM layer owns the scene and all drawing behavior. It sends state-change and notification callbacks to JavaScript, which keeps browser persistence and the UI synchronized.
 
-## Editing
+## Controls
 
-| Key | Action |
-|-----|--------|
+### Drawing and editing
+
+| Input | Action |
+| --- | --- |
+| `p` | Pencil |
+| `l` | Line |
+| `r` | Rectangle |
+| `c` | Circle |
+| `e` | Eraser |
+| `g` | Grab/select |
 | `Ctrl+Z` | Undo |
-| `Right click` | Toggle thick / thin stroke |
-| `d` | Delete a custom color |
-| `1–6` | Switch between palette colors (You can add more if you want) |
+| Right click | Cycle stroke width or eraser size |
+| Mouse wheel | Zoom around the pointer |
+| Middle-mouse drag | Pan the canvas |
 
-## Themes & Colors
+### Grab tool
 
-- **`x`** → toggle light / dark theme
-- Built-in color palette with light and dark presets
-- Add custom colors via the **color picker** button
-- Delete custom colors with **`d`** key
+| Input | Action |
+| --- | --- |
+| Click | Select a shape |
+| Drag | Move the selected shape |
+| `Delete` / `Backspace` | Delete the selected shape |
+| `Ctrl+C` / `Cmd+C` | Copy the selected shape |
+| `Ctrl+V` / `Cmd+V` | Paste a copied shape with an offset |
 
-## Navigation
+Eraser strokes are not selectable.
 
-- **Scroll wheel** → zoom in / out
-- **Middle mouse drag** → pan the canvas
+### Colors, files, and theme
 
-## Persistence
+| Input | Action |
+| --- | --- |
+| `1`-`6` | Select a fixed palette color |
+| `7`-`9` | Select a custom color when present |
+| `d` | Open the custom-color deletion dialog |
+| Hover a custom color | Reveal its red `×` delete control |
+| `x` | Toggle light/dark theme |
+| `s` | Save PDF and JSON files into `data/` |
+| `o` | Open a saved JSON drawing |
 
-- Drawings are **auto-saved to browser localStorage** on every change
-- Reloading the page restores your last drawing
-- **`s`** → export as PDF
-- **`o`** → load a saved drawing from file
+The first six palette colors are built in and cannot be edited or removed. Custom colors can be added with the picker below the palette.
 
-## File Structure
+### Images
 
+- Use the **Image (+)** toolbar button to choose an image.
+- Paste an image from the clipboard with `Ctrl+V` / `Cmd+V`.
+- Drop an image file directly onto the canvas.
+
+Images selected with the file picker are limited to 800 pixels on their longest side.
+
+## Persistence and exports
+
+Every scene change is serialized by the Go core and cached in browser `localStorage`. Reloading the application restores the latest cached scene.
+
+The Python server exposes local endpoints for saving and loading drawings. Pressing `s` writes a PDF and its JSON scene representation into `data/`. That directory contains user-generated content and is ignored by Git.
+
+Custom palette changes are saved through the local server into `src/config.default.js`. Review that file before committing if you added colors while testing.
+
+## Development
+
+Run the Go tests:
+
+```bash
+cd wasm
+go test ./...
 ```
+
+Build the WebAssembly target:
+
+```bash
+./build.sh
+```
+
+After building and starting the server, the browser bridge smoke test is available at [http://localhost:8000/web/test-bridge.html](http://localhost:8000/web/test-bridge.html). It exercises bridge initialization, scene import/export, bounds, pixel export, pencil, undo, grab, and image orientation.
+
+Before committing:
+
+```bash
+git status --short
+git add -A
+git diff --cached --check
+git diff --cached --stat
+```
+
+The repository ignores the local Go toolchain, generated WASM runtime files, Python caches, exported drawings, and local backup files.
+
+## Repository layout
+
+```text
 host-draw/
-├── index.html          # Entry point
-├── style.css           # Styling and theme variables
-├── run_server.py       # Local Python HTTP server
+├── index.html                  Browser entry point
+├── style.css                  Application and palette styles
+├── build.sh                   Go-to-WASM build script
+├── run_server.py              Static server and save/load API
 ├── src/
+│   ├── config.default.js       Keybindings, themes, and presets
 │   ├── core/
-│   │   ├── app.js      # App orchestrator, commands, init
-│   │   ├── canvas.js   # Canvas rendering, pan/zoom, events
-│   │   └── state.js    # State management, history, localStorage
+│   │   ├── app.js              Browser application orchestration
+│   │   ├── canvas.js           DOM input forwarding and render loop
+│   │   ├── commands.js         Command and shortcut registry
+│   │   └── wasm_loader.js      Go/WASM loader
 │   ├── tools/
-│   │   ├── base.js     # Base tool class
-│   │   ├── pencil.js   # Freehand drawing
-│   │   ├── line.js     # Straight lines
-│   │   ├── rectangle.js# Rectangles
-│   │   ├── circle.js   # Circles
-│   │   ├── eraser.js   # Eraser (destination-out)
-│   │   ├── grab.js     # Select, move, copy, delete
-│   │   └── manager.js  # Tool registry and event dispatch
-│   ├── ui/
-│   │   ├── toolbar.js  # Top toolbar buttons
-│   │   ├── hud.js      # Bottom-left keybinding info bar
-│   │   ├── palette.js  # Left-side color palette
-│   │   └── manager.js  # UI orchestrator
-│   ├── utils/
-│   │   └── config.js   # Config loader
-│   └── config.default.js # Default keybindings, colors, themes
-└── data/               # Server-side file storage
+│   │   └── manager.js          UI style state and custom cursors
+│   ├── ui/                     Toolbar, palette, HUD, and memory meter
+│   └── utils/config.js         Configuration loader
+├── wasm/
+│   ├── main.go                  JavaScript bridge registration
+│   ├── core/                    State, shapes, viewport, and WebGL renderer
+│   ├── tools/                   Native drawing tool implementations
+│   └── go.mod
+├── web/
+│   ├── test-bridge.html         Browser bridge smoke test
+│   ├── main.wasm                Generated; ignored
+│   └── wasm_exec.js             Generated; ignored
+└── data/                       Saved drawings; generated and ignored
 ```
+
+## License
+
+This project is released under [CC0 1.0 Universal](LICENSE).

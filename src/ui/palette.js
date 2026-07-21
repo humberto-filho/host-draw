@@ -75,6 +75,23 @@ export class ColorPalette {
 
             item.appendChild(swatch);
             item.appendChild(label);
+
+            // Built-in colors are fixed. Only user-created colors get an
+            // inline remove control.
+            if (index >= BUILTIN_COUNT) {
+                const removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.className = 'color-remove';
+                removeButton.textContent = '×';
+                removeButton.title = `Remove custom color ${c.hex}`;
+                removeButton.setAttribute('aria-label', `Remove custom color ${c.hex}`);
+                removeButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    this.app.deleteCustomColor(index);
+                });
+                item.appendChild(removeButton);
+            }
+
             this.element.appendChild(item);
         });
 
